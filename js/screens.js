@@ -122,7 +122,7 @@
           ])
         ])
       ]),
-      el('div', { class: 'row', style: 'margin-top:14px' }, [
+      el('div', { class: 'row diary-actions', style: 'margin-top:14px' }, [
         button('RIPRESENTA SOLO SBAGLIATE (' + s.wrong + ')', {
           disabled: s.wrong === 0,
           onClick: function () { ctx.start('practice', { wrongOnly: true }); }
