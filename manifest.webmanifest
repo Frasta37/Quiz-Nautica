@@ -1,0 +1,28 @@
+{
+  "id": "./",
+  "name": "Quiz Patente Nautica",
+  "short_name": "Quiz Nautica",
+  "lang": "it",
+  "description": "Simulatore di quiz per la patente nautica: 1435 domande ufficiali, completamente offline.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#062645",
+  "theme_color": "#110d38",
+  "categories": ["education", "utilities"],
+  "icons": [
+    {
+      "src": "assets/ui/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/ui/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

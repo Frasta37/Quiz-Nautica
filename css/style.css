@@ -1,0 +1,2431 @@
+/* ==========================================================================
+   Quiz Patente Nautica — an original 8-bit nautical game world.
+
+   Everything here is presentation only. No quiz logic lives in this file.
+
+   Design rules, applied throughout:
+     - the page is a game world (sky, sea, harbour) with dark navy panels as
+       the interface layer on top, roughly 60/40 colour to contrast;
+     - hard 4px borders and solid offset shadows instead of soft shadows,
+       gradients-on-text or rounded corners;
+     - pixel art is drawn at integer multiples and never smoothed;
+     - the pixel font is used for titles, the HUD, buttons and labels, while
+       questions, answers and explanations keep a normal readable face.
+   ========================================================================== */
+
+/* ---------------- fonts ---------------- */
+
+@font-face {
+  font-family: 'PressStart';
+  src: url('../fonts/press-start-2p.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Silkscreen';
+  src: url('../fonts/silkscreen-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Silkscreen';
+  src: url('../fonts/silkscreen-700.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* ---------------- tokens ---------------- */
+
+:root {
+  /* the world */
+  --sky-hi: #281f63;
+  --sky: #76318f;
+  --sky-lo: #ff5f7d;
+  --sun: #ffd354;
+  --sun-lo: #ff9d2f;
+  --sea-hi: #37e1d8;
+  --sea: #1394ba;
+  --sea-lo: #0d5f91;
+  --sea-deep: #062645;
+  --foam: #fff2c6;
+  --sand: #ffd47a;
+  --sand-lo: #f29e3d;
+  --seaweed: #25c49a;
+  --lighthouse: #ff2e63;
+  --orange: #ff8c1a;
+
+  /* the interface layer */
+  --navy: #110d38;
+  --navy-2: #1b154d;
+  --panel: #221c5a;
+  --panel-hi: #2d2578;
+  --edge: #05031a;
+  --gold: #ffc94a;
+  --gold-lo: #ff9d2f;
+  --ink: #fff6e8;
+  --ink-dim: #c9bde9;
+  --ok: #38e08b;
+  --ok-lo: #116b43;
+  --bad: #ff3b5c;
+  --bad-lo: #7d1830;
+  --warn: #ffcf45;
+
+  --pixel: 4px;
+  --gap: 16px;
+  /* How far the world has shifted toward dusk, 0 by default. The exam clock
+     drives this so the sky reacts to the state of the paper. Registered with
+     @property below so the browser can animate it; an unregistered custom
+     property would jump between values instead of fading. */
+  --dusk: 0;
+  --font-pixel: 'PressStart', 'Silkscreen', ui-monospace, 'Consolas', monospace;
+  --font-ui: 'Silkscreen', ui-monospace, 'Consolas', monospace;
+  --font-read: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --shadow: 4px 4px 0 var(--edge);
+  --shadow-lg: 6px 6px 0 var(--edge);
+}
+
+/* Registered so the browser treats --dusk as a real number and will animate it.
+   Without this, changing it from script snaps the sky instead of fading. */
+@property --dusk {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* ---------------- reset ---------------- */
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: var(--font-read);
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--sea-deep);
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-pixel);
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+  margin: 0 0 12px;
+  color: var(--gold);
+  /* stepped shadow: three offset copies read as a chunky arcade title */
+  text-shadow:
+    3px 3px 0 var(--edge),
+    -2px 0 0 var(--edge), 2px 0 0 var(--edge),
+    0 -2px 0 var(--edge), 0 2px 0 var(--edge);
+}
+
+h1 { font-size: 22px; }
+h2 { font-size: 15px; }
+h3 { font-size: 12px; color: var(--foam); }
+
+p { margin: 0 0 12px; }
+
+a { color: var(--sun); }
+
+code {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  background: var(--navy);
+  border: 2px solid var(--edge);
+  padding: 1px 5px;
+  word-break: break-all;
+}
+
+mark.fix {
+  background: var(--sun);
+  color: var(--navy);
+  padding: 0 2px;
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   The game world behind the interface
+   ========================================================================== */
+
+.world {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* The sky is painted as three stacked layers rather than one gradient, so the
+   time of day can be changed without recomputing a gradient: a warm dusk wash
+   over the sky, and a cool one over the water. --dusk runs 0 (midday) to 1. */
+.world-sky {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg,
+      var(--sky-hi) 0%, var(--sky) 34%, var(--sky-lo) 58%,
+      var(--sea-hi) 74%, var(--sea) 100%);
+}
+
+/* Evening sky: orange low down where the sun is, deep blue up top. Drawn as
+   hard bands so it keeps the chunky look of the rest of the scene. */
+.world-sky::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: var(--dusk);
+  background:
+    linear-gradient(180deg,
+      #10265c 0%, #1c3a72 26%, #4a3f7d 46%, #8a4a76 60%,
+      #c25a5c 72%, #e8894a 84%, #f6c46a 100%);
+}
+
+/* The water loses its light. Placed above the sea bands and below the sprites,
+   so the lighthouse and the boats stay lit while the sea underneath goes grey. */
+.world-dusk {
+  position: absolute;
+  left: 0; right: 0;
+  top: 58%;
+  bottom: 0;
+  opacity: var(--dusk);
+  background:
+    linear-gradient(180deg, #2b3f6b 0%, #1d2c52 45%, #131f3d 100%);
+}
+
+/* Below a quarter of the time left the light goes out entirely. */
+.world.is-dark .world-dusk,
+.world.is-dark .world-sky::before { opacity: 1; }
+
+:root { transition: --dusk 1.2s linear; }
+
+/* stepped horizon: chunky bands instead of a smooth blend */
+.world-sky::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  top: 62%;
+  height: 40px;
+  background:
+    linear-gradient(90deg,
+      var(--sky-lo) 0 8px, transparent 8px 16px,
+      var(--sky-lo) 16px 24px, transparent 24px 48px,
+      var(--sky-lo) 48px 56px, transparent 56px 64px,
+      var(--sky-lo) 64px 96px, transparent 96px 112px,
+      var(--sky-lo) 112px 120px, transparent 120px 160px,
+      var(--sky-lo) 160px 168px, transparent 168px 176px,
+      var(--sky-lo) 176px 224px, transparent 224px 240px,
+      var(--sky-lo) 240px 248px, transparent 248px 256px,
+      var(--sky-lo) 256px 320px, transparent 320px 336px,
+      var(--sky-lo) 336px 344px, transparent 344px 352px);
+  opacity: .5;
+}
+
+.world-clouds { position: absolute; inset: 0; }
+
+.cloud {
+  position: absolute;
+  background-repeat: no-repeat;
+  opacity: .95;
+}
+.c1 { top: 6%;  left: -25%; width: 200px; height: 90px;  animation: drift 78s linear infinite; }
+.c2 { top: 14%; left: -30%; width: 160px; height: 72px;  animation: drift 112s linear infinite; animation-delay: -30s; opacity: .8; }
+.c3 { top: 3%;  left: -20%; width: 120px; height: 54px;  animation: drift 96s  linear infinite; animation-delay: -62s; opacity: .7; }
+.c4 { top: 20%; left: -28%; width: 240px; height: 108px; animation: drift 140s linear infinite; animation-delay: -84s; opacity: .6; }
+
+.world-sun {
+  position: absolute;
+  top: 4%;
+  right: 6%;
+  width: 120px;
+  height: 144px;
+  background: url('../assets/ui/sun.png') no-repeat center / contain;
+  image-rendering: pixelated;
+  animation: sunPulse 6s steps(4, end) infinite;
+}
+
+.world-birds { position: absolute; inset: 0; }
+
+.bird {
+  position: absolute;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+.b1 { top: 26%; left: 12%; width: 40px; height: 15px; animation: fly 34s linear infinite; }
+.b2 { top: 31%; left: 30%; width: 24px; height: 9px;  animation: fly 46s linear infinite; animation-delay: -18s; opacity: .75; }
+
+.world-sea {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 42%;
+}
+
+.sea-band {
+  position: absolute;
+  left: 0; right: 0;
+  background-repeat: repeat;
+}
+
+/* the far water carries the light tile, the near water the darker one */
+.sea-far {
+  top: 0;
+  height: 42%;
+  background-image: url('../assets/ui/sky_tile.png');
+  background-size: 160px 50px;
+  opacity: .5;
+  animation: scrollX 9s linear infinite;
+}
+.sea-near {
+  bottom: 0;
+  height: 58%;
+  background-image: url('../assets/ui/ocean_tile.png');
+  background-size: 192px 60px;
+  animation: scrollX 6s linear infinite;
+}
+
+.world-horizon {
+  position: absolute;
+  left: 0; right: 0;
+  top: 58%;
+  height: 20%;
+}
+
+.world-horizon i,
+.world-fg i {
+  position: absolute;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.isle-lh { right: 12%; bottom: 34%; width: 72px;  height: 120px; animation: lampBlink 5s steps(2, end) infinite; }
+
+/* The lamp earns its keep at night: the beam only appears as the light goes,
+   which gives the dusk state something to happen rather than just a colour
+   change. Kept as a hard-edged wedge so it stays in the same 8-bit language. */
+.isle-lh::after {
+  content: '';
+  position: absolute;
+  left: 100%;
+  bottom: 78%;
+  width: 260px;
+  height: 34px;
+  opacity: 0;
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, rgba(255, 236, 170, .34), rgba(255, 236, 170, 0));
+  clip-path: polygon(0 40%, 100% 0, 100% 100%, 0 60%);
+  pointer-events: none;
+}
+.world:not(.is-dark) .isle-lh::after {
+  opacity: calc(var(--dusk) * .9);
+  animation: sweep 9s ease-in-out infinite;
+}
+.world.is-dark .isle-lh::after {
+  opacity: 1;
+  animation: sweep 9s ease-in-out infinite;
+}
+.isle-a   { left: 8%;   bottom: 18%; width: 168px; height: 91px; }
+.isle-b   { left: 34%;  bottom: 6%;  width: 132px; height: 78px;  opacity: .9; }
+.isle-sail { right: 30%; bottom: 12%; width: 108px; height: 84px; animation: bob 5.5s ease-in-out infinite; }
+.isle-harbor { left: 60%; bottom: 0; width: 184px; height: 72px; opacity: .95; }
+
+.fg-buoy-a { left: 14%; bottom: 8%;  width: 40px; height: 70px; animation: bob 3.4s ease-in-out infinite; }
+.fg-buoy-b { right: 22%; bottom: 4%; width: 32px; height: 56px; animation: bob 4.3s ease-in-out infinite; animation-delay: -1.6s; }
+.fg-boat   { left: 46%; bottom: 6%; width: 126px; height: 84px; animation: bob 3s ease-in-out infinite; }
+.fg-wave   { left: 0; right: 0; bottom: 0; height: 40px; background-repeat: repeat; background-size: 136px 40px; }
+
+/* ==========================================================================
+   Sprites. Every one is drawn at an integer multiple of its pixel size and
+   rendered with nearest-neighbour scaling so it stays crisp.
+   ========================================================================== */
+
+[class^='spr-'], [class*=' spr-'] {
+  background-repeat: no-repeat;
+  background-position: center;
+  image-rendering: pixelated;
+}
+
+.spr-anchor     { background-image: url('../assets/ui/anchor.png');      background-size: 32px 44px; }
+.spr-boat       { background-image: url('../assets/ui/boat.png');        background-size: 108px 72px; }
+.spr-sailboat   { background-image: url('../assets/ui/sailboat.png');    background-size: 90px 70px; }
+.spr-lighthouse { background-image: url('../assets/ui/lighthouse.png');  background-size: 60px 100px; }
+.spr-island     { background-image: url('../assets/ui/island.png');      background-size: 110px 65px; }
+.spr-island-palm{ background-image: url('../assets/ui/island_palm.png'); background-size: 120px 65px; }
+.spr-buoy       { background-image: url('../assets/ui/buoy.png');        background-size: 32px 56px; }
+.spr-buoy-red   { background-image: url('../assets/ui/buoy_red.png');    background-size: 32px 56px; }
+.spr-wheel      { background-image: url('../assets/ui/wheel.png');       background-size: 48px 48px; }
+.spr-compass    { background-image: url('../assets/ui/compass.png');     background-size: 48px 48px; }
+.spr-chart      { background-image: url('../assets/ui/chart.png');       background-size: 42px 39px; }
+.spr-logbook    { background-image: url('../assets/ui/logbook.png');     background-size: 42px 36px; }
+.spr-cloud      { background-image: url('../assets/ui/cloud.png');       background-size: 200px 90px; }
+.spr-cloud2     { background-image: url('../assets/ui/cloud2.png');      background-size: 160px 70px; }
+.spr-sun        { background-image: url('../assets/ui/sun.png');         background-size: 120px 144px; }
+.spr-star       { background-image: url('../assets/ui/star.png');        background-size: 27px 27px; }
+.spr-medal      { background-image: url('../assets/ui/medal.png');       background-size: 40px 40px; }
+.spr-lifering   { background-image: url('../assets/ui/lifering.png');    background-size: 48px 44px; }
+.spr-dock       { background-image: url('../assets/ui/dock.png');        background-size: 96px 36px; }
+.spr-harbor     { background-image: url('../assets/ui/harbor.png');      background-size: 184px 72px; }
+.spr-bird       { background-image: url('../assets/ui/bird.png');        background-size: 32px 12px; }
+.spr-flag-green { background-image: url('../assets/ui/flag_green.png');  background-size: 36px 36px; }
+.spr-flag-red   { background-image: url('../assets/ui/flag_red.png');    background-size: 36px 36px; }
+.spr-flag_green { background-image: url('../assets/ui/flag_green.png');  background-size: 36px 36px; }
+.spr-flag_red   { background-image: url('../assets/ui/flag_red.png');    background-size: 36px 36px; }
+.spr-eye        { background-image: url('../assets/ui/eye.png');         background-size: 30px 27px; }
+.spr-heart      { background-image: url('../assets/ui/heart.png');       background-size: 32px 28px; }
+.spr-wave       { background-image: url('../assets/ui/wave.png');        background-size: 136px 40px; }
+.spr-missing    { background: none; }
+
+/* ==========================================================================
+   Game HUD
+   ========================================================================== */
+
+.hud {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--navy);
+  border-bottom: var(--pixel) solid var(--edge);
+  box-shadow: 0 4px 0 rgba(7, 48, 110, .55);
+}
+
+.hud-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--panel);
+  border: var(--pixel) solid var(--gold-lo);
+  box-shadow: var(--shadow);
+}
+
+.hud-logo {
+  display: block;
+  width: 32px;
+  height: 44px;
+  animation: bob 4s ease-in-out infinite;
+}
+
+.brand-text {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  color: var(--gold);
+  line-height: 1.6;
+  text-shadow: 2px 2px 0 var(--edge);
+}
+
+.modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1 1 auto;
+}
+
+/* A game menu button: sits on its shadow, and presses down into it. */
+.mbtn,
+.pbtn,
+.xbtn,
+.audio-toggle {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: var(--ink);
+  background: var(--panel);
+  border: var(--pixel) solid var(--edge);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  /* phones: no double-tap zoom delay, no grey tap flash */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .06s steps(2, end), background .12s steps(2, end),
+              box-shadow .06s steps(2, end);
+}
+
+.mbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.mbtn .mi { width: 24px; height: 24px; opacity: .95; }
+
+.mbtn:hover,
+.pbtn:hover:not(:disabled),
+.xbtn:hover:not(:disabled),
+.audio-toggle:hover {
+  background: var(--panel-hi);
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 var(--edge);
+}
+
+.mbtn:active,
+.pbtn:active:not(:disabled),
+.xbtn:active:not(:disabled),
+.audio-toggle:active {
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 var(--edge);
+}
+
+.mbtn.is-active {
+  background-color: var(--gold);
+  color: var(--navy);
+  border-color: var(--edge);
+  animation: selectBounce .9s steps(2, end) infinite;
+}
+
+/* The nav highlight has to land in the same frame as the ink colour change.
+ * While `background` is transitioned, the tab can briefly (or, if the
+ * transition is interrupted, permanently) show navy ink on the panel colour,
+ * which is unreadable. Fading the panel shade is not worth that risk, so the
+ * nav tabs cross-fade transform and shadow only. */
+.mbtn {
+  transition-property: transform, box-shadow;
+}
+
+.mbtn:focus-visible,
+.pbtn:focus-visible,
+.answer-btn:focus-visible,
+.opt:focus-visible,
+.xbtn:focus-visible,
+.audio-toggle:focus-visible {
+  outline: 3px solid var(--sun);
+  outline-offset: 2px;
+}
+
+.hud-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.hud-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  background: var(--navy-2);
+  border: 3px solid var(--edge);
+  box-shadow: inset 0 0 0 2px rgba(154, 220, 247, .12);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  letter-spacing: .5px;
+  color: var(--ink-dim);
+}
+
+.hud-chip .mi { width: 18px; height: 18px; }
+.hud-chip b { font-family: var(--font-pixel); font-size: 11px; color: var(--ink); }
+.hud-chip.is-ok b { color: var(--ok); }
+.hud-chip.is-bad b { color: var(--bad); }
+
+/* ==========================================================================
+   Layout
+   ========================================================================== */
+
+.app {
+  position: relative;
+  z-index: 10;
+  flex: 1 1 auto;
+  width: min(1080px, 100%);
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+  outline: none;
+}
+
+.app > * + * { margin-top: 18px; }
+
+.footer {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--navy);
+  border-top: var(--pixel) solid var(--edge);
+  /* the footer carries a sentence, so it uses the readable face */
+  font-family: var(--font-read);
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.footer-note { display: inline-flex; align-items: center; gap: 10px; }
+
+.audio-toggle {
+  padding: 5px 9px;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.audio-toggle.is-on {
+  background: var(--ok);
+  color: var(--navy);
+}
+
+/* ==========================================================================
+   Panels, cards and the 5-box database strip
+   ========================================================================== */
+
+.panel {
+  position: relative;
+  padding: 18px;
+  background: var(--panel);
+  border: var(--pixel) solid var(--edge);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Everywhere except the quiz, panels are slightly translucent so the sea and
+   sky behind them still read as part of the scene. The quiz keeps a solid
+   background, because that is the screen people read long passages on. */
+body:not([data-screen='quiz']) .panel { background: rgba(18, 58, 99, .93); }
+
+.panel-tight { padding: 13px; box-shadow: var(--shadow); }
+
+/* stepped top edge, like a coin-op cabinet marquee */
+.panel::before {
+  content: '';
+  position: absolute;
+  left: var(--pixel);
+  right: var(--pixel);
+  top: calc(var(--pixel) * -1);
+  height: var(--pixel);
+  background:
+    linear-gradient(90deg,
+      var(--gold-lo) 0 12px, transparent 12px 20px,
+      var(--gold-lo) 20px 44px, transparent 44px 52px,
+      var(--gold-lo) 52px 88px, transparent 88px 96px,
+      var(--gold-lo) 96px 140px, transparent 140px 148px);
+  opacity: .5;
+}
+
+.grid {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.row.spread { justify-content: space-between; }
+.stack { display: grid; gap: 8px; }
+.center { text-align: center; }
+.spread { justify-content: space-between; }
+
+/* the database summary: a game status strip, not KPI cards */
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  background: var(--navy-2);
+  border: var(--pixel) solid var(--edge);
+  box-shadow: inset 0 0 0 2px rgba(154, 220, 247, .1);
+}
+
+.stat {
+  flex: 1 1 120px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  background: var(--navy);
+  border: 3px solid var(--edge);
+}
+
+.stat .k {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  letter-spacing: .5px;
+  color: var(--ink-dim);
+  order: 3;
+}
+
+.stat .v {
+  font-family: var(--font-pixel);
+  font-size: 15px;
+  color: var(--foam);
+  order: 2;
+  margin-left: auto;
+}
+
+.stat .v.ok { color: var(--ok); }
+.stat .v.bad { color: var(--bad); }
+
+.stat::before {
+  content: '';
+  order: 1;
+  width: 26px;
+  height: 26px;
+  background-repeat: no-repeat;
+  background-position: center;
+  image-rendering: pixelated;
+}
+
+/* each strip cell gets its own little sprite, keyed off a data attribute */
+.stat[data-ic='chart']::before { background-image: url('../assets/ui/chart.png'); background-size: 26px 24px; }
+.stat[data-ic='island']::before { background-image: url('../assets/ui/island_palm.png'); background-size: 26px 14px; }
+.stat[data-ic='eye']::before { background-image: url('../assets/ui/eye.png'); background-size: 26px 23px; }
+.stat[data-ic='flag-green']::before { background-image: url('../assets/ui/flag_green.png'); background-size: 26px 26px; }
+.stat[data-ic='buoy-red']::before { background-image: url('../assets/ui/buoy_red.png'); background-size: 15px 26px; }
+
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+
+.pbtn {
+  padding: 10px 16px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.pbtn-primary {
+  background: var(--gold);
+  color: var(--navy);
+  border-color: var(--edge);
+}
+
+.pbtn-primary:hover:not(:disabled) { background: var(--sun); }
+
+.pbtn-danger {
+  background: var(--lighthouse);
+  color: var(--navy);
+}
+
+.pbtn-danger:hover:not(:disabled) {
+  background: var(--lighthouse);
+  color: var(--navy);
+}
+
+.pbtn-ghost {
+  background: transparent;
+  color: var(--foam);
+  border-color: var(--sea-lo);
+  box-shadow: 3px 3px 0 var(--edge);
+}
+
+.pbtn:disabled,
+.mbtn:disabled,
+.xbtn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  filter: grayscale(.6);
+}
+
+.xbtn {
+  padding: 5px 9px;
+  font-size: 9px;
+  text-transform: uppercase;
+  background: var(--navy-2);
+  color: var(--foam);
+}
+
+/* ==========================================================================
+   Home screen: an arcade title over the world
+   ========================================================================== */
+
+.hero {
+  padding: 26px 22px 22px;
+  background: rgba(8, 25, 47, .82);
+  border: var(--pixel) solid var(--edge);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+/* the marquee */
+.game-title {
+  font-size: 26px;
+  line-height: 1.6;
+  margin-bottom: 6px;
+  color: var(--gold);
+  text-shadow:
+    4px 4px 0 var(--lighthouse),
+    4px 8px 0 var(--edge),
+    -3px 0 0 var(--edge), 3px 0 0 var(--edge),
+    0 -3px 0 var(--edge), 0 3px 0 var(--edge);
+  animation: titleGlow 3.4s steps(3, end) infinite;
+}
+
+.game-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 7px 14px;
+  background: var(--sea-lo);
+  border: 3px solid var(--edge);
+  box-shadow: var(--shadow);
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--foam);
+}
+
+.game-sub .mi { width: 24px; height: 24px; }
+
+.hero .muted { max-width: 60ch; margin: 0 auto 16px; }
+
+/* menu panels, each with its own identity */
+.mode-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background: var(--panel);
+  border: var(--pixel) solid var(--edge);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  transition: transform .1s steps(3, end), box-shadow .1s steps(3, end),
+              border-color .1s steps(2, end);
+}
+
+.mode-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 4px 8px 0 var(--edge);
+  border-color: var(--gold);
+}
+
+.mode-card:active { transform: translateY(0); box-shadow: var(--shadow); }
+
+.mode-card.is-featured { background: var(--panel-hi); border-color: var(--gold-lo); }
+.mode-card.is-featured::after {
+  content: '';
+  position: absolute;
+  top: -10px; right: 12px;
+  width: 60px; height: 20px;
+  background: var(--lighthouse);
+  border: 3px solid var(--edge);
+}
+
+.mode-card .mode-art {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.mode-card .mode-art .mi { flex: 0 0 auto; transition: transform .12s steps(2, end); }
+.mode-card:hover .mode-art .mi { animation: iconWiggle .5s steps(2, end) infinite; }
+
+.mode-card h3 { margin: 0; color: var(--gold); font-size: 13px; }
+.mode-card p { margin: 8px 0 14px; font-size: 14px; color: var(--ink-dim); }
+.mode-card .pbtn { margin-top: auto; align-self: flex-start; }
+
+/* Running-exam readout. The bank counters stay as they are; these two chips
+   only exist while an official paper is open. */
+.hud-chip.hud-exam,
+.hud-chip.hud-clock {
+  background: var(--panel-hi);
+  border-color: var(--gold-lo);
+  color: var(--foam);
+}
+
+.hud-chip.hud-exam b { color: var(--gold); }
+
+/* .hud-chip sets display, which would otherwise beat the UA rule for the
+   hidden attribute and leave the chips on screen at all times. */
+.hud-chip[hidden] { display: none; }
+
+.hud-clock b { color: var(--foam); }
+.hud-clock.is-low b,
+.hud-clock.is-over b { color: var(--bad); }
+
+/* Quick theme filters. These are buttons, not decoration: the chip writes the
+   chosen TEMA into the dropdown below it, and the dropdown updates the chips.
+   The label uses the readable face because the TEMA names are long words. */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.filter-head {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--gold);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 7px 11px;
+  font-family: var(--font-read);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--navy-2);
+  border: 3px solid var(--edge);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: transform .06s steps(2, end), background .12s steps(2, end),
+              box-shadow .06s steps(2, end);
+}
+
+.chip:hover { background: var(--panel-hi); }
+
+.chip:active {
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 var(--edge);
+}
+
+.chip.is-on {
+  background: var(--gold);
+  color: var(--navy);
+  border-color: var(--edge);
+}
+
+/* The highlight must land with the ink colour, so the background is not
+   transitioned on the selected state. */
+.chip.is-on { transition-property: transform, box-shadow; }
+
+.chip-count {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  color: var(--gold);
+}
+
+.chip.is-on .chip-count { color: var(--navy); }
+
+.chip:focus-visible {
+  outline: 3px solid var(--foam);
+  outline-offset: 2px;
+}
+
+/* "Where the matches live" — the practice search surfaces the TEMA/VOCE a term
+   falls under, so you can click straight into the right topic. */
+.matches-box {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  background: var(--navy-2);
+  border: 3px solid var(--edge);
+  box-shadow: var(--shadow);
+}
+
+.matches-box.is-hidden { display: none; }
+
+.matches-title {
+  margin: 0 0 10px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--gold);
+}
+
+.matches-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.matches-row:last-child { margin-bottom: 0; }
+
+.matches-label {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  color: var(--ink-dim);
+  min-width: 44px;
+}
+
+.match-chip { font-size: 12px; padding: 5px 9px; }
+
+/* ---------------- SCEGLI ESAME ---------------- */
+
+/* The card itself is not clickable: the rules are read on it and the buttons
+   below start the paper, so the pointer cursor would promise something the
+   card does not do. */
+.exam-card { cursor: default; }
+.exam-card .exam-blurb { margin: 0 0 12px; }
+
+.fact-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 9px;
+  background: var(--navy-2);
+  border: 3px solid var(--edge);
+}
+
+.fact b {
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  color: var(--foam);
+}
+
+.fact span {
+  font-family: var(--font-read);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+/* The official distribution, printed on the card so the candidate knows how
+   the 20 questions are split before starting. */
+.rule-list {
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  margin: 0 0 14px;
+  padding: 0;
+}
+
+.rule-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 9px;
+  background: rgba(4, 22, 56, .5);
+  border-left: 4px solid var(--gold);
+  font-family: var(--font-read);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.rule-list li b {
+  margin-left: auto;
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  color: var(--foam);
+}
+
+.rule-list li .small { font-size: 11px; }
+
+.exam-off {
+  padding: 11px;
+  background: rgba(120, 20, 30, .2);
+  border: 3px solid var(--bad);
+}
+
+.exam-off p { margin: 0 0 8px; }
+.exam-off p:last-child { margin-bottom: 0; }
+
+/* ---------------- QUIZ: EXAM BAR ---------------- */
+
+.exam-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.exam-bar-main { display: flex; flex-direction: column; gap: 4px; }
+
+.exam-bar-label {
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--gold);
+}
+
+.clock-row { display: flex; align-items: baseline; gap: 8px; }
+
+.clock {
+  font-family: var(--font-pixel);
+  font-size: 20px;
+  color: var(--foam);
+}
+
+.exam-bar-side { display: flex; gap: 18px; }
+
+.bar-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.bar-num,
+.err-num {
+  font-family: var(--font-pixel);
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.exam-fail { border-color: var(--bad); }
+.exam-fail p { color: var(--bad); }
+
+/* the "diary" block that replaced the plain saved-progress panel */
+.diary {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.diary-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  background: var(--navy-2);
+  border: 3px solid var(--edge);
+  box-shadow: 3px 3px 0 var(--edge);
+}
+
+.diary-item .mi { width: 34px; height: 34px; flex: 0 0 auto; }
+.diary-item .diary-text { min-width: 0; }
+.diary-item .diary-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+.diary-item .diary-value { font-family: var(--font-pixel); font-size: 13px; color: var(--gold); }
+
+/* ==========================================================================
+   Voyage progress: the boat sails from the harbour to the lighthouse
+   ========================================================================== */
+
+.voyage { width: 100%; padding: 4px 0; }
+
+.voyage-track {
+  position: relative;
+  height: 46px;
+  background:
+    repeating-linear-gradient(90deg,
+      var(--sea-lo) 0 12px, var(--sea) 12px 24px);
+  border: 3px solid var(--edge);
+  box-shadow: inset 0 0 0 2px rgba(205, 239, 255, .18);
+}
+
+.voyage-dots {
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 3px;
+  margin-top: -1px;
+  background: repeating-linear-gradient(90deg,
+    var(--foam) 0 10px, transparent 10px 22px);
+  opacity: .55;
+}
+
+.voyage-dock,
+.voyage-goal {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.voyage-dock { left: 2px; width: 48px; height: 36px; background-image: url('../assets/ui/dock.png'); background-size: 48px 18px; background-position: left center; }
+.voyage-goal { right: 2px; width: 36px; height: 60px; background-image: url('../assets/ui/lighthouse.png'); background-size: 36px 60px; }
+
+.voyage-boat {
+  position: absolute;
+  top: 50%;
+  width: 54px;
+  height: 36px;
+  margin: -18px 0 0 -27px;
+  background: url('../assets/ui/boat.png') no-repeat center / 54px 36px;
+  image-rendering: pixelated;
+  animation: bob 2.2s ease-in-out infinite;
+  z-index: 2;
+}
+
+.voyage-count {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  background: var(--navy);
+  border: 3px solid var(--edge);
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  color: var(--gold);
+}
+
+/* ==========================================================================
+   Quiz screen: a game dialogue box around very readable text
+   ========================================================================== */
+
+.qcard {
+  background: var(--panel);
+  border: var(--pixel) solid var(--gold-lo);
+  box-shadow: var(--shadow-lg);
+}
+
+.qhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--navy-2);
+  border-bottom: var(--pixel) solid var(--edge);
+}
+
+.crumb {
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  color: var(--gold);
+}
+
+.qbody { padding: 18px; }
+
+/* readable on purpose: no pixel font here */
+.qtext {
+  font-family: var(--font-read);
+  font-size: 19px;
+  line-height: 1.6;
+  color: #fff;
+  margin-bottom: 16px;
+  padding-left: 14px;
+  border-left: 6px solid var(--gold);
+}
+
+.figure {
+  display: block;
+  margin: 0 0 16px;
+  max-width: 100%;
+  background: #fff;
+  border: var(--pixel) solid var(--edge);
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+
+img.figure { width: auto; height: auto; }
+
+.answers {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.answer-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 15px;
+  text-align: left;
+  font-family: var(--font-read);
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--navy-2);
+  border: var(--pixel) solid var(--edge);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: transform .08s steps(2, end), background .1s steps(2, end),
+              box-shadow .08s steps(2, end);
+}
+
+.answer-key {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  background: var(--gold);
+  color: var(--navy);
+  border: 3px solid var(--edge);
+  font-family: var(--font-pixel);
+  font-size: 12px;
+}
+
+.answer-btn:hover:not(:disabled) {
+  background: var(--panel-hi);
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 var(--edge);
+  border-color: var(--gold);
+}
+
+.answer-btn:active:not(:disabled) { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--edge); }
+
+.answer-btn.is-ok {
+  background: var(--ok-lo);
+  border-color: var(--ok);
+  color: #fff;
+}
+
+.answer-btn.is-ok .answer-key { background: var(--ok); color: var(--navy); }
+
+.answer-btn.is-bad {
+  background: var(--bad-lo);
+  border-color: var(--bad);
+  color: #fff;
+}
+
+.answer-btn.is-bad .answer-key { background: var(--bad); color: #fff; }
+
+.answer-btn:disabled { cursor: default; opacity: 1; }
+.answer-btn:disabled:not(.is-ok):not(.is-bad) { opacity: .72; }
+
+.qfoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--navy-2);
+  border-top: var(--pixel) solid var(--edge);
+}
+
+/* correct / wrong micro-animations */
+.fx-star {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  margin-top: 14px;
+  background: var(--ok-lo);
+  border: var(--pixel) solid var(--ok);
+  box-shadow: var(--shadow);
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+  animation: starPop .45s steps(4, end);
+}
+
+.fx-star .mi { width: 30px; height: 30px; animation: starSpin .9s steps(6, end) infinite; }
+
+.fx-bad {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  margin-top: 14px;
+  background: var(--bad-lo);
+  border: var(--pixel) solid var(--bad);
+  box-shadow: var(--shadow);
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+  animation: shake .4s steps(4, end);
+}
+
+.fx-bad .mi { width: 22px; height: 38px; }
+
+/* a wrong answer nudges the whole card, not the page */
+.qcard.shake { animation: shake .4s steps(4, end); }
+
+.qcard.advance .voyage-boat { animation: bob .6s ease-in-out infinite, sail .6s steps(4, end); }
+
+/* ==========================================================================
+   Result screen: level complete
+   ========================================================================== */
+
+.voyage-done {
+  position: relative;
+  padding: 22px 18px 18px;
+  background:
+    linear-gradient(180deg, rgba(15, 107, 216, .5), rgba(7, 48, 110, .9)),
+    var(--navy);
+  border: var(--pixel) solid var(--gold);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.voyage-done .scene-harbor {
+  position: absolute;
+  right: 10px;
+  bottom: 0;
+  width: 230px;
+  height: 90px;
+  background: url('../assets/ui/harbor.png') no-repeat right bottom / 230px 90px;
+  image-rendering: pixelated;
+  opacity: .95;
+}
+
+.voyage-done .scene-boat {
+  position: absolute;
+  left: 12px;
+  bottom: 6px;
+  width: 108px;
+  height: 72px;
+  background: url('../assets/ui/boat.png') no-repeat center / 108px 72px;
+  image-rendering: pixelated;
+  animation: bob 3s ease-in-out infinite;
+}
+
+.voyage-done .scene-lighthouse {
+  position: absolute;
+  right: 34%;
+  bottom: 0;
+  width: 48px;
+  height: 80px;
+  background: url('../assets/ui/lighthouse.png') no-repeat center bottom / 48px 80px;
+  image-rendering: pixelated;
+  animation: lampBlink 5s steps(2, end) infinite;
+}
+
+.voyage-banner {
+  position: relative;
+  display: inline-block;
+  padding: 12px 20px;
+  margin-bottom: 14px;
+  background: var(--navy);
+  border: var(--pixel) solid var(--gold);
+  box-shadow: 6px 6px 0 var(--edge);
+  font-family: var(--font-pixel);
+  font-size: 15px;
+  color: var(--gold);
+  text-align: center;
+}
+
+.voyage-banner.ok { color: var(--ok); border-color: var(--ok); }
+.voyage-banner.bad { color: var(--bad); border-color: var(--bad); }
+
+.score-big {
+  font-family: var(--font-pixel);
+  font-size: 40px;
+  color: var(--foam);
+  text-shadow: 4px 4px 0 var(--edge);
+}
+
+.score-big.ok { color: var(--ok); }
+.score-big.bad { color: var(--bad); }
+
+.rank-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--navy-2);
+  border: var(--pixel) solid var(--gold-lo);
+  box-shadow: var(--shadow);
+}
+
+.rank-badge .rank-medal { width: 44px; height: 44px; }
+.rank-name {
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  color: var(--gold);
+}
+
+.star-row { display: flex; gap: 4px; margin-top: 6px; }
+.star-row .spr-star { width: 22px; height: 22px; }
+.star-row .is-off { opacity: .28; filter: grayscale(1); }
+
+.rank-capitano .rank-medal { animation: starSpin 3s steps(8, end) infinite; }
+
+.result-item {
+  padding: 11px 13px;
+  margin-bottom: 8px;
+  background: var(--navy-2);
+  border: 3px solid var(--edge);
+  border-left: 6px solid var(--ink-dim);
+  font-size: 15px;
+}
+
+.result-item.is-wrong { border-left-color: var(--bad); }
+
+/* ==========================================================================
+   Archive, statistics, logbook bits
+   ========================================================================== */
+
+.opt {
+  padding: 9px 11px;
+  font-family: var(--font-read);
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--navy);
+  border: var(--pixel) solid var(--sea-lo);
+  box-shadow: var(--shadow);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  /* filter labels are words, not HUD glyphs: readable on purpose */
+  font-family: var(--font-read);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-read);
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.check input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--gold);
+}
+
+.tag {
+  display: inline-block;
+  padding: 3px 8px;
+  background: var(--navy);
+  border: 3px solid var(--edge);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  letter-spacing: .5px;
+  color: var(--ink-dim);
+}
+
+.tag-ok { color: var(--ok); border-color: var(--ok-lo); }
+.tag-bad { color: var(--bad); border-color: var(--bad-lo); }
+.tag-warn { color: var(--warn); border-color: var(--gold-lo); }
+.tag-info { color: var(--foam); border-color: var(--sea-lo); }
+
+.bank-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 2px solid rgba(10, 28, 51, .6);
+  font-size: 15px;
+}
+
+.bank-row .num {
+  flex: 0 0 auto;
+  min-width: 62px;
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  color: var(--gold);
+}
+
+.bank-row .txt { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bank-row .right { flex: 0 0 auto; display: flex; gap: 6px; align-items: center; }
+.bank-row.is-right { border-left: 6px solid var(--ok); }
+.bank-row.is-wrong { border-left: 6px solid var(--bad); }
+.bank-row.is-new { border-left: 6px solid var(--sea-lo); }
+
+/* the diary-of-bord readings */
+.bar-row { margin-bottom: 11px; }
+.bar-row .lbl {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 15px;
+  margin-bottom: 5px;
+}
+.bar-row .lbl .muted { font-size: 12px; }
+
+.bar {
+  height: 18px;
+  background: var(--navy);
+  border: 3px solid var(--edge);
+  box-shadow: inset 0 0 0 2px rgba(205, 239, 255, .1);
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  background: var(--sea-hi);
+  background-image: repeating-linear-gradient(90deg,
+    rgba(255, 255, 255, .22) 0 6px, transparent 6px 12px);
+}
+.bar > i.good { background-color: var(--ok); }
+.bar > i.bad { background-color: var(--bad); }
+
+.kv { width: 100%; border-collapse: collapse; font-size: 15px; }
+.kv th, .kv td {
+  padding: 7px 9px;
+  border: 2px solid var(--edge);
+  text-align: left;
+  vertical-align: top;
+}
+.kv th {
+  width: 44%;
+  font-family: var(--font-read);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  background: var(--navy-2);
+}
+
+/* ==========================================================================
+   Source dialog
+   ========================================================================== */
+
+.sheet {
+  width: min(920px, 94vw);
+  max-height: 90vh;
+  padding: 0;
+  color: var(--ink);
+  background: var(--navy);
+  border: var(--pixel) solid var(--gold-lo);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, .5);
+}
+
+.sheet::backdrop { background: rgba(4, 18, 31, .78); }
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border-bottom: var(--pixel) solid var(--edge);
+}
+
+.sheet-head h2 { margin: 0; }
+
+.sheet-body { padding: 16px; overflow: auto; max-height: 66vh; font-size: 15px; }
+
+.sheet-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border-top: var(--pixel) solid var(--edge);
+}
+
+.srcbox {
+  margin: 0 0 14px;
+  padding: 12px;
+  background: var(--panel);
+  border: 3px solid var(--edge);
+  box-shadow: var(--shadow);
+}
+
+.srcbox h3 { margin-bottom: 8px; }
+
+.srcbox dl {
+  display: grid;
+  grid-template-columns: minmax(120px, 34%) 1fr;
+  gap: 3px 10px;
+  margin: 0;
+  font-size: 14px;
+}
+.srcbox dt {
+  /* source content stays readable; the pixel face is for headings only */
+  font-family: var(--font-read);
+  font-size: 13px;
+  color: var(--ink-dim);
+  padding-top: 3px;
+}
+.srcbox dd { margin: 0; color: var(--ink); }
+
+.rawbox {
+  padding: 9px 11px;
+  background: var(--navy);
+  border: 3px solid var(--edge);
+  font-family: var(--font-read);
+  line-height: 1.6;
+}
+
+.rawbox.changed { border-color: var(--gold-lo); }
+
+.fixlist, .flaglist { margin: 6px 0 0; padding-left: 20px; }
+.fixlist li, .flaglist li { margin-bottom: 7px; font-size: 14px; }
+.flaglist { list-style: square; color: var(--warn); }
+
+/* Collapsible source sections. The summary behaves like the .srcbox h3 above
+   it, so the modal keeps one visual rhythm whether a block is open or closed. */
+.src-details { padding: 0; }
+.src-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 12px;
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--gold);
+  cursor: pointer;
+  list-style: none;
+}
+
+.src-details > summary::-webkit-details-marker { display: none; }
+.src-details > summary:hover { background: var(--panel-hi); }
+.src-details > summary:focus-visible { outline: 3px solid var(--foam); outline-offset: -3px; }
+
+/* the little arrow, drawn with borders so it stays pixel-crisp */
+.src-details > summary::after {
+  content: '';
+  margin-left: auto;
+  width: 0; height: 0;
+  border: 7px solid transparent;
+  border-top-color: var(--foam);
+  transition: transform .1s steps(2, end);
+}
+
+.src-details[open] > summary::after { transform: rotate(180deg); }
+.src-details[open] > summary { border-bottom: 3px solid var(--edge); }
+
+/* children of a collapsed section need their own spacing back */
+.src-details > .srcbox { margin: 12px; }
+.src-nested { background: var(--navy); }
+
+/* ==========================================================================
+   Shared text bits
+   ========================================================================== */
+
+.muted { color: var(--ink-dim); }
+.small { font-size: 13px; }
+
+.hero .muted,
+.panel > .muted { font-size: 15px; }
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes drift {
+  from { transform: translateX(0); }
+  to { transform: translateX(150vw); }
+}
+@keyframes fly {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(120vw, -40px); }
+}
+@keyframes scrollX {
+  from { background-position-x: 0; }
+  to { background-position-x: 192px; }
+}
+@keyframes sunPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .82; }
+}
+/* The beam rocks slowly out over the water, like a light on a real headland. */
+@keyframes sweep {
+  0%, 100% { transform: rotate(-7deg); }
+  50% { transform: rotate(7deg); }
+}
+@keyframes lampBlink {
+  0%, 49% { filter: brightness(1); }
+  50%, 100% { filter: brightness(1.45); }
+}
+@keyframes selectBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes iconWiggle {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(-6deg); }
+}
+@keyframes titleGlow {
+  0%, 100% { color: var(--gold); }
+  50% { color: var(--sun); }
+}
+@keyframes starPop {
+  0% { transform: scale(.6); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+@keyframes starSpin {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.15); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+@keyframes sail {
+  0% { transform: translate(-27px, 0) scaleX(1); }
+  50% { transform: translate(-45px, 0) scaleX(.92); }
+  100% { transform: translate(-27px, 0) scaleX(1); }
+}
+
+/* ==========================================================================
+   Reduced motion: keep the game look, drop the movement.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .voyage-boat,
+  .fg-boat,
+  .cloud,
+  .bird,
+  .sea-band { animation: none !important; }
+  /* The beam keeps its resting angle instead of sweeping, so the lighthouse
+     still reads as lit after dark. */
+  .isle-lh::after { animation: none !important; transform: rotate(-4deg); }
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  .hud-status { margin-left: 0; width: 100%; }
+  .hud { gap: 8px; }
+  .brand-text { font-size: 9px; }
+  .game-title { font-size: 18px; }
+}
+
+@media (max-width: 620px) {
+  .modes { width: 100%; }
+  .mbtn { flex: 1 1 auto; justify-content: center; font-size: 9px; }
+  .mbtn .mi { display: none; }
+  .qtext { font-size: 17px; }
+  .answer-btn { font-size: 16px; padding: 11px 12px; }
+  .score-big { font-size: 30px; }
+  .hero { padding: 18px 14px; }
+}
+
+@media print {
+  .world, .hud, .footer, .qfoot { display: none !important; }
+  body { background: #fff; color: #000; }
+  .panel, .qcard { border-color: #000; box-shadow: none; background: #fff; color: #000; }
+}
+
+/* Final visual cleanup pass */
+:root{
+  --vice-panel:#120e3b;
+  --vice-line:#221c5a;
+  --vice-ink:#fff6e8;
+  --vice-dim:#c9bde9;
+  --vice-accent:#ffd354;
+  --vice-action:#ff8c37;
+  --vice-info:#37e1d8;
+}
+html,
+body{
+  background:
+    linear-gradient(180deg,#150b42 0%,#4d2370 34%,#b54174 55%,#22708f 72%,#072440 100%) fixed;
+}
+.world{
+  background:
+    linear-gradient(180deg,#150b42 0%,#4d2370 34%,#b54174 55%,#22708f 72%,#072440 100%);
+}
+.world::before,
+.cloud,
+.bird{
+  display:none !important;
+}
+.world-sun{
+  width:132px !important;
+  height:132px !important;
+  top:14% !important;
+  right:12% !important;
+  filter:none !important;
+}
+.world-sun::after{
+  content:none !important;
+}
+.sea-far{
+  top:54% !important;
+  height:14% !important;
+  background:#2fd4d5 !important;
+  background-image:none !important;
+  opacity:.74 !important;
+}
+.sea-near{
+  top:66% !important;
+  height:34% !important;
+  background:#062645 !important;
+  background-image:none !important;
+}
+.world-horizon{
+  top:54% !important;
+  height:46% !important;
+}
+.world-horizon::before{
+  height:2px !important;
+  background:rgba(255,242,220,.78) !important;
+  box-shadow:none !important;
+}
+.isle-a{
+  left:6% !important;
+  bottom:16% !important;
+  width:154px !important;
+  height:115px !important;
+  filter:brightness(.28) saturate(.32) contrast(1.05) !important;
+}
+.isle-b,
+.isle-sail,
+.isle-harbor,
+.isle-lh,
+.fg-buoy-a,
+.fg-buoy-b{
+  display:none !important;
+}
+.fg-boat{
+  left:43% !important;
+  bottom:4% !important;
+  width:126px !important;
+  height:94px !important;
+  filter:none !important;
+}
+.fg-wave{
+  height:32px !important;
+  opacity:.72 !important;
+}
+.app{
+  width:min(1360px,100%) !important;
+  padding:26px 16px 44px !important;
+}
+.app > * + *{
+  margin-top:24px !important;
+}
+.hud{
+  width:min(1360px,100%) !important;
+  margin:0 auto !important;
+  padding:12px 14px !important;
+  background:rgba(9,7,34,.94) !important;
+  border:2px solid #221c5a !important;
+  box-shadow:none !important;
+}
+.hud-brand{
+  gap:8px !important;
+  min-width:190px !important;
+  padding:0 !important;
+  border:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
+}
+.hud-logo{
+  width:28px !important;
+  height:38px !important;
+  opacity:.92 !important;
+}
+.brand-text strong{
+  color:var(--vice-accent) !important;
+  text-shadow:none !important;
+}
+.brand-text small{
+  color:var(--vice-dim) !important;
+}
+.topbar .mbtn{
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
+  color:var(--vice-dim) !important;
+  padding:8px 9px !important;
+  gap:6px !important;
+}
+.topbar .mbtn .mi{
+  width:20px !important;
+  height:20px !important;
+  opacity:.82 !important;
+}
+.topbar .mbtn:hover{
+  background:rgba(55,225,216,.1) !important;
+  color:var(--vice-ink) !important;
+}
+.topbar .mbtn.is-active{
+  background:var(--gold) !important;
+  color:var(--navy) !important;
+  box-shadow:inset 0 -3px 0 var(--edge) !important;
+}
+.hud-right{
+  gap:10px !important;
+}
+.hud-chip{
+  background:rgba(19,16,64,.78) !important;
+  border:1px solid #2d2578 !important;
+  box-shadow:none !important;
+  padding:6px 8px !important;
+  color:var(--vice-dim) !important;
+  gap:6px !important;
+  min-width:64px !important;
+}
+.hud-chip .mi{
+  width:20px !important;
+  height:20px !important;
+  opacity:.84 !important;
+}
+.hud-chip b{
+  color:var(--vice-ink) !important;
+  font-size:11px !important;
+}
+.hud-chip.is-ok b{color:#38e08b !important;}
+.hud-chip.is-bad b{color:#ff3b5c !important;}
+.hud-exam,
+.hud-clock{
+  background:rgba(28,22,80,.88) !important;
+  border-color:#3a2f86 !important;
+}
+.hud-exam b,
+.hud-clock b{
+  color:var(--vice-accent) !important;
+}
+.hero{
+  padding:26px 18px 22px !important;
+  border:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  text-align:center !important;
+}
+.game-title{
+  font-size:28px !important;
+  line-height:1.35 !important;
+  letter-spacing:0 !important;
+  margin:0 auto 14px !important;
+  max-width:820px !important;
+  color:var(--vice-accent) !important;
+  animation:none !important;
+  text-shadow:3px 3px 0 #05031a !important;
+}
+.game-sub{
+  display:inline-flex !important;
+  gap:9px !important;
+  align-items:center !important;
+  margin:0 auto 16px !important;
+  padding:7px 12px !important;
+  background:rgba(19,16,64,.74) !important;
+  border:0 !important;
+  box-shadow:none !important;
+  color:var(--vice-dim) !important;
+  font-family:var(--font-ui) !important;
+  font-size:10px !important;
+}
+.game-sub .mi{
+  width:20px !important;
+  height:20px !important;
+  opacity:.9 !important;
+}
+.hero .muted{
+  max-width:68ch !important;
+  margin:0 auto 22px !important;
+  color:var(--vice-dim) !important;
+  font-size:15px !important;
+  line-height:1.55 !important;
+}
+.stat-row{
+  width:100% !important;
+  margin:0 auto !important;
+  gap:10px !important;
+  padding:12px !important;
+  background:rgba(13,10,45,.82) !important;
+  border:2px solid #221c5a !important;
+  box-shadow:inset 0 0 0 1px rgba(143,245,255,.05) !important;
+}
+.stat{
+  flex:1 1 150px !important;
+  gap:10px !important;
+  padding:10px 12px !important;
+  background:rgba(24,19,72,.86) !important;
+  border:0 !important;
+  box-shadow:none !important;
+}
+.stat .mi{
+  width:28px !important;
+  height:28px !important;
+  opacity:.92 !important;
+}
+.stat .v{
+  color:var(--vice-accent) !important;
+  font-size:15px !important;
+}
+.stat .k{
+  color:var(--vice-dim) !important;
+}
+.stat.ok .v{color:#38e08b !important;}
+.stat.bad .v{color:#ff3b5c !important;}
+.panel{
+  padding:22px !important;
+  background:rgba(16,12,51,.9) !important;
+  border:2px solid #221c5a !important;
+  box-shadow:none !important;
+}
+body:not([data-screen='quiz']) .panel{
+  background:rgba(16,12,51,.9) !important;
+}
+.panel::before{
+  display:none !important;
+}
+.panel-tight{
+  padding:14px !important;
+  border-color:#3a2f86 !important;
+  box-shadow:none !important;
+}
+.panel h2{
+  font-size:13px !important;
+  color:#8ff5ff !important;
+  margin:0 0 18px !important;
+  text-shadow:2px 2px 0 #05031a !important;
+}
+.grid{
+  gap:18px !important;
+}
+.mode-card{
+  padding:20px !important;
+  background:#151052 !important;
+  border:2px solid #2d2578 !important;
+  box-shadow:none !important;
+  transition:transform .12s ease,border-color .12s ease,background .12s ease !important;
+}
+.mode-card:hover{
+  transform:translateY(-2px) !important;
+  border-color:var(--vice-info) !important;
+  background:#171256 !important;
+}
+.mode-card.is-featured{
+  border-color:var(--vice-accent) !important;
+  background:#181256 !important;
+  box-shadow:4px 4px 0 rgba(255,207,69,.22) !important;
+}
+.mode-card.is-featured::after{
+  display:none !important;
+}
+.mode-art{
+  margin:0 0 14px !important;
+  padding:0 !important;
+  min-height:0 !important;
+  gap:12px !important;
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
+}
+.mode-art .mi{
+  width:42px !important;
+  height:42px !important;
+  background-size:contain !important;
+  opacity:1 !important;
+}
+.mode-card h3{
+  font-size:13px !important;
+  color:var(--vice-ink) !important;
+  text-shadow:2px 2px 0 #05031a !important;
+}
+.mode-card p{
+  margin:0 0 18px !important;
+  color:var(--vice-dim) !important;
+  font-size:13.5px !important;
+  line-height:1.55 !important;
+}
+.mode-card .pbtn{
+  width:100% !important;
+  align-self:stretch !important;
+  padding:9px 12px !important;
+  background:#1d185f !important;
+  border:2px solid #3a2f86 !important;
+  color:#8ff5ff !important;
+  box-shadow:none !important;
+}
+.mode-card.is-featured .pbtn{
+  background:var(--vice-action) !important;
+  border-color:#05031a !important;
+  color:#150b42 !important;
+}
+.pbtn{
+  border-width:2px !important;
+  box-shadow:none !important;
+}
+.pbtn:not(:disabled):hover{
+  transform:translateY(-1px) !important;
+}
+.pbtn:not(:disabled):active{
+  transform:translateY(0) !important;
+}
+.answer-btn,
+.opt,
+.bank-row,
+.chip,
+.result-item,
+.tag,
+.qcard,
+.sheet,
+.srcbox,
+.rawbox,
+.voyage-banner{
+  border-width:2px !important;
+  box-shadow:none !important;
+}
+.answer-btn.is-correct{
+  background:rgba(56,224,139,.12) !important;
+  border-color:#38e08b !important;
+}
+.answer-btn.is-wrong{
+  background:rgba(255,59,92,.12) !important;
+  border-color:#ff3b5c !important;
+}
+.qcard,
+.sheet,
+.srcbox,
+.rawbox,
+.voyage-banner{
+  background:rgba(16,12,51,.94) !important;
+  border-color:#221c5a !important;
+}
+.diary{
+  gap:18px !important;
+  margin-bottom:20px !important;
+}
+.diary-item{
+  gap:12px !important;
+  padding:16px !important;
+  background:rgba(24,19,72,.82) !important;
+  border:1px solid #2d2578 !important;
+  box-shadow:none !important;
+}
+.diary .mi{
+  width:34px !important;
+  height:34px !important;
+  opacity:.95 !important;
+}
+.diary-label{
+  font-size:9px !important;
+  color:var(--vice-dim) !important;
+  letter-spacing:.5px !important;
+}
+.diary-value{
+  font-size:16px !important;
+  color:var(--vice-accent) !important;
+  text-shadow:none !important;
+}
+.diary-value.ok{color:#38e08b !important;}
+.diary-value.bad{color:#ff3b5c !important;}
+.footer{
+  width:min(1360px,100%) !important;
+  margin:26px auto 0 !important;
+  padding:12px !important;
+  border:0 !important;
+  border-top:2px solid #221c5a !important;
+  background:transparent !important;
+  color:var(--vice-dim) !important;
+  box-shadow:none !important;
+}
+.footer .brand-text strong{
+  color:var(--vice-accent) !important;
+}
+.footer .brand-text small,
+.footer .muted,
+.footer .small{
+  color:var(--vice-dim) !important;
+}
+@media print{
+  html,
+  body,
+  .world,
+  .world *,
+  .hud,
+  .footer,
+  .panel,
+  .qcard,
+  .sheet,
+  .srcbox,
+  .rawbox,
+  .chip,
+  .pbtn,
+  .answer-btn,
+  .bank-row,
+  .result-item,
+  .tag,
+  .opt,
+  .voyage-banner,
+  .stat,
+  .mbtn,
+  .mode-card{
+    background:#fff !important;
+    border-color:#000 !important;
+    box-shadow:none !important;
+    color:#000 !important;
+    filter:none !important;
+    text-shadow:none !important;
+  }
+  .world{
+    display:none !important;
+  }
+}
+
+/* Miami offshore presentation tail */
+.game-title {
+  text-transform: uppercase;
+}
+
+.game-sub {
+  text-transform: none;
+}
+
+.mi {
+  flex-shrink: 0;
+}
+
+.mbtn {
+  transition-property: transform, box-shadow;
+}
+
+@media (min-width: 1120px) {
+  .home-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 1119.98px) {
+  .home-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+body[data-screen='bank'] .row .opt {
+  flex: 0 1 auto !important;
+  max-width: 340px !important;
+}
+
+body[data-screen='bank'] .row .opt:first-child {
+  flex: 1 1 260px !important;
+  max-width: 420px !important;
+}
+
+@media (min-width: 1600px) {
+  .world-sun {
+    width: 96px !important;
+    height: 96px !important;
+    top: 8% !important;
+    right: 12px !important;
+  }
+}
+
+@media (max-width: 1599.98px) {
+  .world-sun {
+    display: none !important;
+  }
+}
+
+@media (min-width: 1120px) {
+  body { font-size: 18px !important; line-height: 1.55 !important; }
+  h1 { font-size: 30px !important; line-height: 1.4 !important; margin: 0 0 14px !important; }
+  h2 { font-size: 18px !important; line-height: 1.4 !important; margin: 0 0 14px !important; }
+  h3 { font-size: 15px !important; line-height: 1.45 !important; margin: 0 0 12px !important; }
+  .game-title { font-size: 34px !important; line-height: 1.3 !important; max-width: 900px !important; margin: 0 auto 16px !important; }
+  .game-sub { font-size: 12px !important; padding: 8px 14px !important; }
+  .hero .muted, .panel > .muted { font-size: 17px !important; line-height: 1.6 !important; }
+  .panel h2 { font-size: 17px !important; margin: 0 0 18px !important; }
+  .mode-card h3 { font-size: 15px !important; }
+  .mode-card p { font-size: 15px !important; line-height: 1.55 !important; margin: 0 0 18px !important; }
+  .brand-text { font-size: 12px !important; line-height: 1.6 !important; }
+  .mbtn { font-size: 11px !important; }
+  .topbar .mbtn { padding: 9px 11px !important; gap: 7px !important; }
+  .pbtn { font-size: 13px !important; padding: 11px 16px !important; }
+  .mode-card .pbtn { padding: 10px 14px !important; }
+  .audio-toggle { font-size: 11px !important; }
+  .hud-chip { font-size: 10px !important; padding: 7px 9px !important; }
+  .hud-chip b { font-size: 13px !important; }
+  .stat { padding: 10px 12px !important; }
+  .stat .v { font-size: 18px !important; }
+  .stat .k { font-size: 11px !important; }
+  .filter-head { font-size: 13px !important; }
+  .chip { font-size: 15px !important; padding: 9px 13px !important; }
+  .chip-count { font-size: 12px !important; }
+  .qhead { padding: 12px 16px !important; }
+  .crumb { font-size: 13px !important; }
+  .qbody { padding: 22px !important; }
+  .qtext { font-size: 22px !important; line-height: 1.65 !important; margin-bottom: 18px !important; padding-left: 16px !important; border-left: 8px solid var(--gold) !important; }
+  .answers { gap: 12px !important; }
+  .answer-btn { font-size: 20px !important; line-height: 1.55 !important; padding: 15px 17px !important; gap: 12px !important; }
+  .answer-key { font-size: 14px !important; width: 38px !important; height: 38px !important; }
+  .qfoot { padding: 16px 20px !important; gap: 14px !important; }
+  .fx-star, .fx-bad { font-size: 14px !important; padding: 11px 16px !important; }
+  .voyage-count { font-size: 12px !important; padding: 3px 10px !important; }
+  .diary-label { font-size: 11px !important; }
+  .diary-value { font-size: 18px !important; }
+  .voyage-banner { font-size: 18px !important; padding: 14px 22px !important; }
+  .score-big { font-size: 48px !important; }
+  .rank-name { font-size: 16px !important; }
+  .result-item { font-size: 17px !important; padding: 13px 15px !important; }
+  .opt { font-size: 16px !important; padding: 11px 13px !important; }
+  .field { font-size: 15px !important; }
+  .check { font-size: 17px !important; }
+  .tag { font-size: 11px !important; padding: 4px 10px !important; }
+  .bank-row { font-size: 17px !important; padding: 10px 12px !important; gap: 12px !important; }
+  .bank-row .num { font-size: 12px !important; min-width: 72px !important; }
+  .bar-row .lbl { font-size: 17px !important; }
+  .bar-row .lbl .muted { font-size: 14px !important; }
+  .kv { font-size: 17px !important; }
+  .kv th { font-size: 14px !important; }
+  .sheet-body { font-size: 17px !important; line-height: 1.6 !important; }
+  .srcbox dl { font-size: 16px !important; }
+  .srcbox dt { font-size: 15px !important; }
+  .src-details > summary { font-size: 13px !important; padding: 13px 14px !important; }
+  .rawbox { font-size: 17px !important; line-height: 1.65 !important; }
+  .small { font-size: 15px !important; line-height: 1.55 !important; }
+  .footer .small, .footer .muted { font-size: 14px !important; }
+  code { font-size: 14px !important; }
+}
+
+@media (min-width: 1600px) {
+  .app, .hud, .footer { width: min(1520px, 100%) !important; }
+  .game-title { max-width: 980px !important; }
+  .hero .muted { max-width: 78ch !important; }
+}
+
+@media (min-width: 1120px) {
+  .voyage-done { padding-bottom: 104px !important; }
+}
+
+/* ==========================================================================
+   Mobile (PWA) pass
+   Placed after the final visual cleanup pass on purpose, so it wins the
+   cascade (that pass uses !important). Sizes target phones: 320-430px wide.
+   ========================================================================== */
+
+@media (max-width: 620px) {
+  /* The five mode buttons get their own space as a 3 + 2 grid instead of a
+     cramped single line under the brand. */
+  .modes {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6px !important;
+  }
+  .mbtn {
+    justify-content: center !important;
+    font-size: 8px !important;
+    padding: 8px 5px !important;
+  }
+  .hud {
+    padding: 8px 10px !important;
+  }
+  .hud-chip {
+    padding: 4px 7px !important;
+  }
+  .app {
+    padding: 18px 12px 32px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* On a phone the wordmark eats space the navigation needs; the anchor logo
+     alone identifies the app. */
+  .brand-text {
+    display: none !important;
+  }
+  .hud-brand {
+    min-width: 0 !important;
+  }
+}
+
+/* Installed on iPhone: keep the footer clear of the home indicator. In a
+   normal browser env(safe-area-inset-bottom) is 0, so this is a no-op there. */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .footer {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+}

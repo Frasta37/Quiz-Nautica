@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quiz Patente Nautica</title>
+<meta name="description" content="Simulatore di quiz per la patente nautica, completamente offline.">
+<link rel="icon" href="assets/ui/app_icon.png">
+<!-- PWA: installable on iPhone (Share > Add to Home Screen) and Android
+     (Chrome install prompt). Runs full-screen, offline once loaded. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#110d38">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Quiz Nautica">
+<link rel="apple-touch-icon" href="assets/ui/apple-touch-icon.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body data-screen="home">
+
+<!-- The game world behind everything. Purely decorative, never interactive. -->
+<div class="world" aria-hidden="true">
+  <div class="world-sky"></div>
+  <div class="world-clouds">
+    <i class="spr-cloud cloud c1"></i>
+    <i class="spr-cloud cloud c2"></i>
+    <i class="spr-cloud cloud c3"></i>
+    <i class="spr-cloud cloud c4"></i>
+  </div>
+  <div class="world-sun"></div>
+  <div class="world-birds">
+    <i class="spr-bird bird b1"></i>
+    <i class="spr-bird bird b2"></i>
+  </div>
+  <div class="world-sea">
+    <div class="sea-band sea-far"></div>
+    <div class="sea-band sea-near"></div>
+  </div>
+  <!-- Above the water, below the sprites: the sea loses its light as the exam
+       clock runs down, so a paper going badly looks like it. -->
+  <div class="world-dusk"></div>
+  <div class="world-horizon">
+    <i class="spr-lighthouse isle-lh"></i>
+    <i class="spr-island-palm isle-a"></i>
+    <i class="spr-island isle-b"></i>
+    <i class="spr-sailboat isle-sail"></i>
+    <i class="spr-harbor isle-harbor"></i>
+  </div>
+  <div class="world-fg">
+    <i class="spr-buoy fg-buoy-a"></i>
+    <i class="spr-buoy fg-buoy-b"></i>
+    <i class="spr-boat fg-boat"></i>
+    <i class="spr-wave fg-wave"></i>
+  </div>
+</div>
+
+<!-- Game HUD: an old status bar rather than a browser toolbar. -->
+<header class="topbar hud">
+  <div class="hud-brand">
+    <i class="spr-anchor hud-logo" aria-hidden="true"></i>
+    <span class="brand-text">QUIZ PATENTE NAUTICA</span>
+  </div>
+
+  <nav class="modes" id="modeNav" aria-label="Modalita">
+    <button type="button" class="mbtn is-active" data-screen="home"><i class="mi spr-wheel" aria-hidden="true"></i><span>HOME</span></button>
+    <button type="button" class="mbtn" data-screen="exam"><i class="mi spr-lighthouse" aria-hidden="true"></i><span>ESAME</span></button>
+    <button type="button" class="mbtn" data-screen="practice"><i class="mi spr-buoy" aria-hidden="true"></i><span>ALLENAMENTO</span></button>
+    <button type="button" class="mbtn" data-screen="bank"><i class="mi spr-chart" aria-hidden="true"></i><span>ARCHIVIO</span></button>
+    <button type="button" class="mbtn" data-screen="stats"><i class="mi spr-logbook" aria-hidden="true"></i><span>STATISTICHE</span></button>
+  </nav>
+
+  <div class="hud-status" id="hudStatus">
+    <span class="hud-chip"><i class="mi spr-chart" aria-hidden="true"></i><b id="hudTotal">0</b><span>DOMANDE</span></span>
+    <span class="hud-chip"><i class="mi spr-eye" aria-hidden="true"></i><b id="hudSeen">0</b><span>VISTE</span></span>
+    <span class="hud-chip is-ok"><i class="mi spr-flag-green" aria-hidden="true"></i><b id="hudRight">0</b><span>CORRETTE</span></span>
+    <span class="hud-chip is-bad"><i class="mi spr-buoy-red" aria-hidden="true"></i><b id="hudWrong">0</b><span>ERRORI</span></span>
+    <!-- During an official paper the HUD carries the running exam, so the time
+         left and the position in the paper stay visible on every screen. -->
+    <span class="hud-chip hud-exam" id="hudExam" hidden><i class="mi spr-lighthouse" aria-hidden="true"></i><b id="hudExamLabel">ESAME</b><span>DOMANDA <b id="hudExamPos">0/0</b></span></span>
+    <span class="hud-chip hud-clock" id="hudClock" hidden><i class="mi spr-compass" aria-hidden="true"></i><b id="hudClockTime">00:00</b><span>TEMPO</span></span>
+  </div>
+</header>
+
+<main id="app" class="app" tabindex="-1"></main>
+
+<footer class="footer">
+  <span class="footer-note">
+    <button type="button" class="audio-toggle" id="audioToggle" aria-pressed="false">AUDIO OFF</button>
+  </span>
+  <span class="footer-credit">MADE IN FIESSO 2026 - FAUSTO RUGGERI</span>
+</footer>
+
+<script src="data/questions.js"></script>
+<script src="data/categories.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/data.js"></script>
+<script src="js/store.js"></script>
+<script src="js/pool.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/source.js"></script>
+<script src="js/exam.js"></script>
+<script src="js/session.js"></script>
+<script src="js/screens.js"></script>
+<script src="js/app.js"></script>
+<script src="js/sw-register.js"></script>
+</body>
+</html>
