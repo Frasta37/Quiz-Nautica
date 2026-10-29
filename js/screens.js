@@ -526,7 +526,10 @@
           onclick: function () {
             session.answer(i);
             sfx(i === q.correctAnswer ? 'correct' : 'wrong');
-            ctx.render();
+            /* Re-render in place: locking the buttons and the feedback must not
+             * drag the page back to the top, or on a phone the AVANTI button
+             * ends up below the fold again right when it is needed. */
+            ctx.render({ scroll: 'keep' });
           }
         }, [
           el('span', { class: 'answer-key', text: a.letter }),

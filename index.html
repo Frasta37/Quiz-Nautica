@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Quiz Patente Nautica</title>
 <meta name="description" content="Simulatore di quiz per la patente nautica, completamente offline.">
 <link rel="icon" href="assets/ui/app_icon.png">
@@ -77,7 +77,7 @@
     <span class="hud-chip is-bad"><i class="mi spr-buoy-red" aria-hidden="true"></i><b id="hudWrong">0</b><span>ERRORI</span></span>
     <!-- During an official paper the HUD carries the running exam, so the time
          left and the position in the paper stay visible on every screen. -->
-    <span class="hud-chip hud-exam" id="hudExam" hidden><i class="mi spr-lighthouse" aria-hidden="true"></i><b id="hudExamLabel">ESAME</b><span>DOMANDA <b id="hudExamPos">0/0</b></span></span>
+    <span class="hud-chip hud-exam" id="hudExam" hidden><i class="mi spr-lighthouse" aria-hidden="true"></i><b id="hudExamLabel">ESAME</b><span>DOMANDA <b id="hudExamPos">0/0</b></span><b id="hudExamErr">0/0</b><span>ERRORI</span></span>
     <span class="hud-chip hud-clock" id="hudClock" hidden><i class="mi spr-compass" aria-hidden="true"></i><b id="hudClockTime">00:00</b><span>TEMPO</span></span>
   </div>
 </header>

@@ -33,7 +33,7 @@
       render(name);
     },
 
-    render: function () { render(currentScreen); },
+    render: function (opts) { render(currentScreen, opts); },
 
     /* Lets the quiz screen refresh the HUD clock without reaching into this
      * module, so there is still a single owner of the session state. */
@@ -122,7 +122,8 @@
     return Data.sample(pool, size);
   }
 
-  function render(name) {
+  function render(name, opts) {
+    opts = opts || {};
     currentScreen = name;
     stopActiveTimers();
     UI.clear(appNode);
@@ -168,6 +169,27 @@
     }
 
     appNode.focus();
+    scrollToScreen(name, opts);
+  }
+
+  /* Where the page should sit after a redraw. A fresh screen starts at the top;
+   * the quiz lands on the top of the question card, right below the sticky HUD
+   * (the very top of the page hides under it); an answer re-render ('keep')
+   * moves the page not at all, so the button for the next question stays under
+   * the thumb instead of ending up below the fold on a phone. */
+  function scrollToScreen(name, opts) {
+    var mode = opts.scroll || (name === 'quiz' ? 'card' : 'top');
+    if (mode === 'keep') return;
+    if (mode === 'card') {
+      var card = appNode.querySelector('.qcard');
+      if (card) {
+        var hud = document.querySelector('.hud');
+        var top = card.getBoundingClientRect().top + global.scrollY -
+          (hud ? hud.offsetHeight : 0);
+        global.scrollTo(0, Math.max(0, top));
+        return;
+      }
+    }
     global.scrollTo(0, 0);
   }
 
@@ -193,6 +215,14 @@
     document.getElementById('hudExamLabel').textContent = session.exam.label;
     document.getElementById('hudExamPos').textContent =
       (session.index + 1) + '/' + session.total();
+    /* Errors are mirrored here from the in-page exam bar, which scrolls away
+     * once the question card is brought under the sticky HUD on a phone. */
+    var errChip = document.getElementById('hudExamErr');
+    if (errChip) {
+      var used = session.errorsUsed();
+      errChip.textContent = used + '/' + session.exam.maxErrors;
+      errChip.classList.toggle('is-bad', used > session.exam.maxErrors);
+    }
 
     var left = session.timeLeftMs();
     var time = document.getElementById('hudClockTime');
@@ -289,7 +319,7 @@
       if (ev.key >= '1' && ev.key <= '6') {
         var idx = Number(ev.key) - 1;
         var q = session.current();
-        if (q && q.answers[idx]) { session.answer(idx); render('quiz'); }
+        if (q && q.answers[idx]) { session.answer(idx); render('quiz', { scroll: 'keep' }); }
       } else if (ev.key === 'ArrowRight') {
         session.next(); render('quiz');
       } else if (ev.key === 'ArrowLeft') {

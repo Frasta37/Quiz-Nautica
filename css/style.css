@@ -2388,22 +2388,41 @@ body[data-screen='bank'] .row .opt:first-child {
    ========================================================================== */
 
 @media (max-width: 620px) {
-  /* The five mode buttons get their own space as a 3 + 2 grid instead of a
-     cramped single line under the brand. */
-  .modes {
-    display: grid !important;
-    grid-template-columns: repeat(3, 1fr) !important;
+  /* The sticky HUD is on every screen; with the brand, the five mode buttons
+     and the status chips all wrapping it stacks up to ~200px and eats a quarter
+     of the phone before the question even starts. Each row gets its own
+     horizontal scroll lane and the brand row disappears, so it stays at two
+     lines no matter how many exam chips are running. */
+  .hud {
     gap: 6px !important;
+    padding: 8px 10px !important;
   }
+  .hud-brand {
+    display: none !important;
+  }
+  .modes {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .modes::-webkit-scrollbar { display: none; }
   .mbtn {
+    flex: 0 0 auto !important;
     justify-content: center !important;
     font-size: 8px !important;
     padding: 8px 5px !important;
   }
-  .hud {
-    padding: 8px 10px !important;
+  .hud-status {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
+  .hud-status::-webkit-scrollbar { display: none; }
   .hud-chip {
+    flex: 0 0 auto !important;
     padding: 4px 7px !important;
   }
   .app {
@@ -2411,21 +2430,21 @@ body[data-screen='bank'] .row .opt:first-child {
   }
 }
 
-@media (max-width: 480px) {
-  /* On a phone the wordmark eats space the navigation needs; the anchor logo
-     alone identifies the app. */
-  .brand-text {
-    display: none !important;
-  }
-  .hud-brand {
-    min-width: 0 !important;
-  }
-}
+/* The exam chip's error counter turns red once the budget is blown. */
+#hudExamErr.is-bad { color: var(--bad) !important; }
 
 /* Installed on iPhone: keep the footer clear of the home indicator. In a
    normal browser env(safe-area-inset-bottom) is 0, so this is a no-op there. */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
   .footer {
     padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* Installed as a PWA: keep the sticky HUD clear of the status bar / notch.
+   In a normal browser env(safe-area-inset-top) is 0, so this is a no-op. */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .hud {
+    padding-top: calc(8px + env(safe-area-inset-top)) !important;
   }
 }
